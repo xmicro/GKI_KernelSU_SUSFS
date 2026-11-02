@@ -168,8 +168,8 @@ jobs:
             repo: https://github.com/tiann/KernelSU.git
             ref: main
           - flavor: bakasu
-            repo: https://github.com/Baka-SU/BakaSU.git
-            ref: main
+            repo: https://github.com/xmicro/BakaSU.git
+            ref: Baka-uid
           - flavor: sukisu-ultra
             repo: https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
             ref: main
@@ -352,8 +352,8 @@ jobs:
             repo: https://github.com/tiann/KernelSU.git
             ref: main
           - flavor: bakasu
-            repo: https://github.com/Baka-SU/BakaSU.git
-            ref: main
+            repo: https://github.com/xmicro/BakaSU.git
+            ref: Baka-uid
           - flavor: sukisu-ultra
             repo: https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
             ref: main
