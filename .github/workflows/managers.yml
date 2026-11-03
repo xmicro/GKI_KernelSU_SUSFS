@@ -32,7 +32,7 @@ on:
         type: string
         default: ""
       bakasu_commit:
-        description: "Pin BakaSU manager to this commit (40-char SHA, empty = latest main tip)"
+        description: "Pin BakaSU manager to this commit (40-char SHA, empty = latest Baka-uid-2 tip)"
         required: false
         type: string
         default: ""
@@ -169,7 +169,7 @@ jobs:
             ref: main
           - flavor: bakasu
             repo: https://github.com/xmicro/BakaSU.git
-            ref: Baka-uid
+            ref: Baka-uid-2
           - flavor: sukisu-ultra
             repo: https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
             ref: main
@@ -353,7 +353,7 @@ jobs:
             ref: main
           - flavor: bakasu
             repo: https://github.com/xmicro/BakaSU.git
-            ref: Baka-uid
+            ref: Baka-uid-2
           - flavor: sukisu-ultra
             repo: https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
             ref: main
