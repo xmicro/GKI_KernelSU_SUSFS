@@ -54,7 +54,7 @@ on:
         type: boolean
         default: false
       commit_mode:
-        description: "latest = branch tips, verified = audited pins"
+        description: "latest = branch tips; verified = audited pins. Custom root branches use their latest tip in either mode."
         required: false
         type: choice
         options:
