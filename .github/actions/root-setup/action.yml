@@ -7,6 +7,14 @@ inputs:
   commit:
     description: 'Full immutable commit SHA'
     required: true
+  branch:
+    description: 'Branch chosen in the build form (commit remains pinned to its resolved SHA)'
+    required: false
+    default: ''
+  susfs:
+    description: 'Whether SUSFS is enabled; KernelSU-Next uses the pershoot fork when true'
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -14,6 +22,9 @@ runs:
     - name: Clone and integrate selected root
       shell: bash
       working-directory: ${{ github.workspace }}/kernel
+      env:
+        ROOT_SOURCE_BRANCH: ${{ inputs.branch }}
+        ROOT_WITH_SUSFS: ${{ inputs.susfs }}
       run: |
         set -euo pipefail
 
@@ -26,7 +37,11 @@ runs:
             manager="KernelSU Manager"
             ;;
           next)
-            repo="https://github.com/KernelSU-Next/KernelSU-Next.git"
+            if [ "$ROOT_WITH_SUSFS" = true ]; then
+              repo="https://github.com/pershoot/KernelSU-Next.git"
+            else
+              repo="https://github.com/KernelSU-Next/KernelSU-Next.git"
+            fi
             directory="KernelSU-Next"
             manager="KernelSU Next Manager"
             ;;
@@ -94,6 +109,7 @@ runs:
           echo "Root commit mismatch: expected $expected_commit, got $actual_commit." >&2
           exit 1
         fi
+        echo "[+] Selected $flavor branch: ${ROOT_SOURCE_BRANCH:-unspecified} (${actual_commit:0:12})"
 
         # ---- deterministic KSU version -------------------------------------
         # kernel/Kbuild derives KSU_VERSION from git: BASE_BRANCH comes from
@@ -223,3 +239,4 @@ runs:
         else
           echo "No susfs_compat gate present; nothing to do"
         fi
+
