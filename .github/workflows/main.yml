@@ -62,29 +62,29 @@ on:
           - verified
         default: verified
       root_next_branch:
-        description: "KernelSU-Next: default dev-susfs (SUSFS on), dev (off). Enter N to skip; another branch overrides."
+        description: "N = skip. Usual branch: dev-susfs (SUSFS on), dev (off)."
         type: string
         default: dev-susfs
       root_kernelsu_branch:
-        description: "KernelSU: default main. Enter N to skip; another branch overrides."
+        description: "N = skip. Usual branch: main."
         type: string
         default: main
       root_bakasu_branch:
-        description: "BakaSU: default main. Enter N to skip; another branch overrides."
+        description: "N = skip. Usual branch: main."
         type: string
         default: main
       root_sukisu_ultra_branch:
-        description: "SukiSU-Ultra: default builtin (SUSFS on), main (off). Blank or N skips; enter a branch to build."
+        description: "N = skip. Usual branch: builtin (SUSFS on), main (off)."
         type: string
-        default: ""
+        default: N
       root_kowsu_branch:
-        description: "KowSU: default master (SUSFS must be off). Blank or N skips; enter a branch to build."
+        description: "N = skip. Usual branch: master. Requires SUSFS off."
         type: string
-        default: ""
+        default: N
       root_finasu_branch:
-        description: "FinaSU: default master (SUSFS must be on). Blank or N skips; enter a branch to build."
+        description: "N = skip. Usual branch: master. Requires SUSFS on."
         type: string
-        default: ""
+        default: N
       use_susfs:
         description: "SUSFS"
         type: boolean
