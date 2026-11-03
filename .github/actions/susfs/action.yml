@@ -176,6 +176,29 @@ runs:
         sublevel: ${{ inputs.sublevel }}
         os_patch_level: ${{ inputs.os_patch_level }}
 
+    - name: Fix BakaSU SUSFS unused functions
+      if: inputs.enabled == 'true' && inputs.root_flavor == 'bakasu'
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        set -euo pipefail
+
+        FILE="fs/susfs.c"
+
+        if grep -Fq 'static struct cred *susfs_switch_to_ksu_domain(void) {' "$FILE" &&
+           grep -Fq 'static void susfs_restore_creds(struct cred *orig_cred) {' "$FILE" &&
+           grep -Fxq '/* sus_path */' "$FILE"; then
+
+          sed -i \
+            -e '/^static struct cred \*susfs_switch_to_ksu_domain(void) {/i #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER' \
+            -e '/^\/\* sus_path \*\//i #endif /* CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER */' \
+            "$FILE"
+
+          echo "BakaSU SUSFS compatibility fix applied"
+        else
+          echo "Compatibility patch not applicable; skipping"
+        fi
+
     # (susfs-revert-patches removed 2026-10-27: its only live step rewrote
     # `goto show_pad;`, a line SUSFS stopped emitting in ef16cbc (2026-05-10);
     # the gated sources no longer contain it either, so the step was a no-op.)
