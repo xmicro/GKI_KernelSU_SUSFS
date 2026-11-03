@@ -43,6 +43,10 @@ on:
         required: false
         type: string
         default: ""
+      root_branch:
+        required: false
+        type: string
+        default: ""
       nomount_commit:
         required: false
         type: string
@@ -244,6 +248,8 @@ jobs:
         with:
           flavor: ${{ inputs.root_flavor }}
           commit: ${{ inputs.root_commit }}
+          branch: ${{ inputs.root_branch }}
+          susfs: ${{ contains(inputs.feature_set, 'SUSFS') || inputs.feature_set == 'All' }}
 
       - name: Mark No Root build metadata
         if: inputs.root_flavor == 'none'
@@ -559,3 +565,4 @@ jobs:
           path: /tmp/build-summary-${{ steps.build-summary.outputs.summary_base }}.md
           if-no-files-found: warn
           compression-level: 9
+
