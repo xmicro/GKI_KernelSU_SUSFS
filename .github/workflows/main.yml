@@ -62,27 +62,27 @@ on:
           - verified
         default: verified
       root_next_branch:
-        description: "KernelSU-Next: default dev-susfs (SUSFS on), dev (off). Blank skips; enter another branch to override."
+        description: "KernelSU-Next: default dev-susfs (SUSFS on), dev (off). Enter N to skip; another branch overrides."
         type: string
         default: dev-susfs
       root_kernelsu_branch:
-        description: "KernelSU: default main. Blank skips; enter another branch to override."
+        description: "KernelSU: default main. Enter N to skip; another branch overrides."
         type: string
         default: main
       root_bakasu_branch:
-        description: "BakaSU: default main. Blank skips; enter another branch to override."
+        description: "BakaSU: default main. Enter N to skip; another branch overrides."
         type: string
         default: main
       root_sukisu_ultra_branch:
-        description: "SukiSU-Ultra: default builtin (SUSFS on), main (off). Blank skips; enter a branch to build."
+        description: "SukiSU-Ultra: default builtin (SUSFS on), main (off). Blank or N skips; enter a branch to build."
         type: string
         default: ""
       root_kowsu_branch:
-        description: "KowSU: default master (SUSFS must be off). Blank skips; enter a branch to build."
+        description: "KowSU: default master (SUSFS must be off). Blank or N skips; enter a branch to build."
         type: string
         default: ""
       root_finasu_branch:
-        description: "FinaSU: default master (SUSFS must be on). Blank skips; enter a branch to build."
+        description: "FinaSU: default master (SUSFS must be on). Blank or N skips; enter a branch to build."
         type: string
         default: ""
       use_susfs:
@@ -332,7 +332,9 @@ jobs:
           emit kernelsu_commit "$(resolve_sha https://github.com/KernelSU-Next/KernelSU-Next.git refs/heads/dev)"
           echo "kernelsu_branch=dev" >> "$GITHUB_OUTPUT"
 
-          # Each nonempty branch field selects one root variant. Blank skips it.
+          # Each nonempty branch selects one root variant. N explicitly skips,
+          # since GitHub may restore a declared default when a field is cleared.
+          # Already-empty (non-prefilled) fields also skip.
           # Scheduled runs (if re-enabled) use the three original core flavors.
           if [ "${{ github.event_name }}" = "schedule" ]; then
             SCHED_SUSFS=true
@@ -345,6 +347,14 @@ jobs:
           else
             SCHED_SUSFS="${{ inputs.use_susfs }}"
           fi
+          # Normalize the explicit opt-out before validating refs or creating
+          # the matrix. An uppercase N is reserved and cannot name a branch.
+          [ "$ROOT_NEXT_BRANCH" = "N" ] && ROOT_NEXT_BRANCH=""
+          [ "$ROOT_KERNELSU_BRANCH" = "N" ] && ROOT_KERNELSU_BRANCH=""
+          [ "$ROOT_BAKASU_BRANCH" = "N" ] && ROOT_BAKASU_BRANCH=""
+          [ "$ROOT_SUKISU_ULTRA_BRANCH" = "N" ] && ROOT_SUKISU_ULTRA_BRANCH=""
+          [ "$ROOT_KOWSU_BRANCH" = "N" ] && ROOT_KOWSU_BRANCH=""
+          [ "$ROOT_FINASU_BRANCH" = "N" ] && ROOT_FINASU_BRANCH=""
           for branch in "$ROOT_NEXT_BRANCH" "$ROOT_KERNELSU_BRANCH" "$ROOT_BAKASU_BRANCH" \
                         "$ROOT_SUKISU_ULTRA_BRANCH" "$ROOT_KOWSU_BRANCH" "$ROOT_FINASU_BRANCH"; do
             [ -z "$branch" ] || git check-ref-format --branch "$branch" >/dev/null || {
