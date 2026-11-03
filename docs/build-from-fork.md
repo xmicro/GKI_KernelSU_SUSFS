@@ -53,7 +53,7 @@ The **OS patch level** field accepts one of the following:
 The matrix files under [`.github/config/`](../.github/config/) are the source of truth for available dates and sublevels. To guarantee one matrix row, select a unique patch date or `lts`; if you use a numeric sublevel, check the config first to confirm it occurs only once.
 
 > [!WARNING]
-> Do not leave **Kernel Version**, **OS patch level**, and **Root Flavor** set to `All` for a first test. Those defaults fan out across every exposed family, every matching matrix row, and all three root implementations, potentially creating hundreds of kernel jobs.
+> Do not leave **Kernel Version** and **OS patch level** at `All` with all three prefilled root branches for a first test. That combination can create hundreds of kernel jobs. Clear the branches of the roots you do not want to build.
 
 ## 3. Run One Build in the GitHub UI
 
@@ -61,7 +61,7 @@ The matrix files under [`.github/config/`](../.github/config/) are the source of
 2. Select **Build Kernels**.
 3. Select **Run workflow**.
 4. Choose the branch containing your desired changes, normally `main`.
-5. Set a specific **Kernel Version**, **OS patch level**, and **Root Flavor**.
+5. Set a specific **Kernel Version** and **OS patch level**. Keep only the root branches you want to build; clear the others.
 6. Select **Run workflow**.
 
 Recommended settings for a first build:
@@ -74,11 +74,22 @@ Recommended settings for a first build:
 | OS patch level | One unique date or `lts` | Selects one matrix row. A numeric sublevel can match multiple dates. |
 | Kernel Branding | Your short brand name | Changes the kernel's local version string. |
 | Commit mode | `verified` | Uses the project's verified component pins where pins are supported. |
-| Root Flavor | One implementation | Produces one kernel instead of KernelSU-Next, KernelSU, and BakaSU builds. `SukiSU-Ultra`, `KowSU`, `FinaSU`, and `No Root` are opt-in only and are not part of `All`. `KowSU` cannot be combined with SUSFS; `FinaSU` requires SUSFS. |
+| Root branch fields | Leave one branch filled | A filled field selects that root and its named branch. Clear the others to avoid extra builds. |
 | Feature toggles | Keep the defaults initially | Establishes a known baseline before customizing features. |
 | Test release notes | `false` | `true` skips the kernel builds and only previews release notes. |
 
-Root Flavor choices are `KernelSU-Next`, `KernelSU`, `BakaSU`, `SukiSU-Ultra`, `KowSU`, `FinaSU`, `No Root`, or `All`. `All` builds only KernelSU-Next, KernelSU, and BakaSU. `KowSU` always tracks the latest `master` tip and errors out if SUSFS is enabled. `FinaSU` is pinned in verified mode and errors out if SUSFS is disabled (its kernel hard-depends on the susfs headers). `No Root` produces a kernel with no root implementation (and no manager APK). Install the matching manager after flashing a rooted build; see [Post-install Setup](post-install.md).
+The six root fields accept branch names. **A filled field builds that root; an empty field skips it.** Change the name to use a custom branch; clear *all six* to build **No Root** (no manager APK). Only the first three are filled initially:
+
+| Root | Default branch | Initial field value |
+| --- | --- | --- |
+| KernelSU-Next | `dev-susfs` with SUSFS; `dev` without SUSFS | `dev-susfs` |
+| KernelSU | `main` | `main` |
+| BakaSU | `main` | `main` |
+| SukiSU-Ultra | `builtin` with SUSFS; `main` without SUSFS | blank |
+| KowSU | `master` (SUSFS must be off) | blank |
+| FinaSU | `master` (SUSFS must be on) | blank |
+
+Each selected root gets its own kernel build and manager lookup. The `verified` commit mode retains audited pins on the relevant default branches when SUSFS is on; custom branch names always resolve to their current tips. If you turn SUSFS off while keeping KernelSU-Next selected, change its prefilled `dev-susfs` to `dev`. `KowSU` cannot be combined with SUSFS; `FinaSU` requires SUSFS. Install the matching manager after flashing a rooted build; see [Post-install Setup](post-install.md).
 
 ### Example: Current Android 15 / Linux 6.6 LTS
 
@@ -89,7 +100,7 @@ Use:
 | Kernel Version | `6.6.x-android15` |
 | OS patch level | `lts` |
 | Commit mode | `verified` |
-| Root Flavor | `KernelSU` |
+| Root branches | KernelSU `main`; clear KernelSU-Next and BakaSU |
 
 The workflow syncs `common-android15-6.6-lts` and reads the actual numeric `SUBLEVEL` from the synced kernel Makefile. Because that branch moves, a later LTS build can produce a newer sublevel.
 
@@ -102,7 +113,7 @@ Use:
 | Kernel Version | `6.1.x-android14` |
 | OS patch level | `118` or `2025-01` |
 | Commit mode | `verified` |
-| Root Flavor | `KernelSU` |
+| Root branches | KernelSU `main`; clear KernelSU-Next and BakaSU |
 
 Both selectors resolve to the configured `2025-01` row. The expected artifact prefix is:
 
@@ -125,7 +136,9 @@ gh workflow run main.yml \
   -f os_patch_level=lts \
   -f brand_name=MyKernel \
   -f commit_mode=verified \
-  -f root_flavor=KernelSU
+  -f root_next_branch= \
+  -f root_kernelsu_branch=main \
+  -f root_bakasu_branch=
 ```
 
 Android 14 / Linux 6.1.118:
@@ -139,7 +152,9 @@ gh workflow run main.yml \
   -f os_patch_level=118 \
   -f brand_name=MyKernel \
   -f commit_mode=verified \
-  -f root_flavor=KernelSU
+  -f root_next_branch= \
+  -f root_kernelsu_branch=main \
+  -f root_bakasu_branch=
 ```
 
 Find and watch the run:
@@ -256,7 +271,7 @@ Open the selected family's JSON file under [`.github/config/`](../.github/config
 
 ### The workflow creates more jobs than expected
 
-Cancel the run and check all three selectors. Use one **Kernel Version**, one **OS patch level**, and one **Root Flavor** rather than `All`.
+Cancel the run and check **Kernel Version**, **OS patch level**, and the six root branch fields. Use one kernel family and one patch level, then clear all unwanted root branches.
 
 ### Release or cache steps fail with a permission error
 
@@ -265,3 +280,4 @@ Check **Settings → Actions → General → Workflow permissions** and the orga
 ### The kernel builds but does not boot
 
 Do not retry by changing random feature switches. Restore the stock boot image, verify the exact kernel/KMI family, and collect the information requested by the project's issue templates. Generic GKI compatibility is broad, not universal.
+
