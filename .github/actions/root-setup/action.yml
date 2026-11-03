@@ -31,7 +31,7 @@ runs:
             manager="KernelSU Next Manager"
             ;;
           bakasu)
-            repo="https://github.com/Baka-SU/BakaSU.git"
+            repo="https://github.com/xmicro/BakaSU.git"
             directory="BakaSU"
             manager="BakaSU Manager"
             ;;

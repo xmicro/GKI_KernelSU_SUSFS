@@ -240,12 +240,11 @@ jobs:
           # KernelSU: official main tip (28db74f6, 2026-11-01, "kernel: Fix
           # SELinux generation tracking for policy updates (#3964)").
           PIN_KERNELSU="28db74f6f4692e97006ce9ebd8b19b9cc614b5b7"
-          # BakaSU: official main tip (516d3e87, 2026-10-31, "ksuinit: make lint
-          # check happy"). Still tracks latest despite the fa12ffd fake_state
-          # removal - the 5 older branches (12-5.10/13-5.10/13-5.15/14-5.15/
-          # 14-6.1) fs patches reference `fake_state` and will fail to link with
-          # latest BakaSU; 6.6/6.12/6.18 are unaffected. Watch those 5 families.
-          PIN_BAKASU="516d3e87fbc986ccefdde2c2765f1700612441a9"
+          # BakaSU: xmicro/BakaSU Baka-uid (defd04a6, 2026-11-02).
+          # Includes the SUSFS priority UID filter integration.
+          # Verified mode pins this SHA; latest/update follow Baka-uid.
+          # Older GKI families may still need SUSFS fake_state compatibility.
+          PIN_BAKASU="defd04a6d25ea9ac9a095f532309ff8831c7e684"
           # SukiSU-Ultra: builtin tip (1cfa5734, 2026-10-31); defines fake_state
           # itself and calls the susfs_def.h no_su API -> OK on tips. Note the
           # repo's default branch (main, b8bd4b6c) is used only for SUSFS-off
@@ -334,12 +333,12 @@ jobs:
           fi
           if [ "$SCHED_SUSFS" = "true" ]; then
             KERNELSU_COMMIT="$(pick "$PIN_KERNELSU" https://github.com/tiann/KernelSU.git refs/heads/main)"
-            BAKASU_COMMIT="$(pick "$PIN_BAKASU" https://github.com/Baka-SU/BakaSU.git refs/heads/main)"
+            BAKASU_COMMIT="$(pick "$PIN_BAKASU" https://github.com/xmicro/BakaSU.git refs/heads/Baka-uid)"
             SUKISU_ULTRA_COMMIT="$(pick "$PIN_SUKISU_ULTRA" https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/builtin)"
             FINASU_COMMIT="$(pick "$PIN_FINASU" https://github.com/LyraVoid/FinaSU.git refs/heads/master)"
           else
             KERNELSU_COMMIT="$(resolve_sha https://github.com/tiann/KernelSU.git refs/heads/main)"
-            BAKASU_COMMIT="$(resolve_sha https://github.com/Baka-SU/BakaSU.git refs/heads/main)"
+            BAKASU_COMMIT="$(resolve_sha https://github.com/xmicro/BakaSU.git refs/heads/Baka-uid)"
             SUKISU_ULTRA_COMMIT="$(resolve_sha https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/main)"
             FINASU_COMMIT="$(resolve_sha https://github.com/LyraVoid/FinaSU.git refs/heads/master)"
           fi
