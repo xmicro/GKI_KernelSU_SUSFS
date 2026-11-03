@@ -53,7 +53,7 @@ The **OS patch level** field accepts one of the following:
 The matrix files under [`.github/config/`](../.github/config/) are the source of truth for available dates and sublevels. To guarantee one matrix row, select a unique patch date or `lts`; if you use a numeric sublevel, check the config first to confirm it occurs only once.
 
 > [!WARNING]
-> Do not leave **Kernel Version** and **OS patch level** at `All` with all three prefilled root branches for a first test. That combination can create hundreds of kernel jobs. Enter `N` for prefilled roots you do not want to build.
+> Do not leave **Kernel Version** and **OS patch level** at `All` with all three initially selected root branches for a first test. That combination can create hundreds of kernel jobs. Enter `N` for roots you do not want to build.
 
 ## 3. Run One Build in the GitHub UI
 
@@ -61,7 +61,7 @@ The matrix files under [`.github/config/`](../.github/config/) are the source of
 2. Select **Build Kernels**.
 3. Select **Run workflow**.
 4. Choose the branch containing your desired changes, normally `main`.
-5. Set a specific **Kernel Version** and **OS patch level**. Enter `N` for prefilled roots you want to skip; leave the other unused root fields blank.
+5. Set a specific **Kernel Version** and **OS patch level**. Enter `N` for every root method you want to skip.
 6. Select **Run workflow**.
 
 Recommended settings for a first build:
@@ -74,22 +74,18 @@ Recommended settings for a first build:
 | OS patch level | One unique date or `lts` | Selects one matrix row. A numeric sublevel can match multiple dates. |
 | Kernel Branding | Your short brand name | Changes the kernel's local version string. |
 | Commit mode | `verified` | Uses the project's verified component pins where pins are supported. |
-| Root branch fields | Leave one branch selected | A branch name builds that root. Enter `N` to skip prefilled roots; leave unused non-prefilled fields blank. |
+| Root branch fields | Leave one branch selected | A branch name builds that root; `N` skips it. |
 | Feature toggles | Keep the defaults initially | Establishes a known baseline before customizing features. |
 | Test release notes | `false` | `true` skips the kernel builds and only previews release notes. |
 
-The six root fields accept branch names. **A branch name builds that root; `N` skips it.** Fields that start blank can remain blank to skip. GitHub may restore the declared default if you clear a prefilled field, so **enter `N` instead of clearing** KernelSU-Next, KernelSU, or BakaSU. Enter `N` for all three prefilled fields and leave the other three blank to build **No Root** (no manager APK). Only the first three are filled initially:
+Each root manager has its own branch field:
 
-| Root | Default branch | Initial field value |
-| --- | --- | --- |
-| KernelSU-Next | `dev-susfs` with SUSFS; `dev` without SUSFS | `dev-susfs` |
-| KernelSU | `main` | `main` |
-| BakaSU | `main` | `main` |
-| SukiSU-Ultra | `builtin` with SUSFS; `main` without SUSFS | blank |
-| KowSU | `master` (SUSFS must be off) | blank |
-| FinaSU | `master` (SUSFS must be on) | blank |
+- Enter `N` to skip that root manager.
+- Enter a branch name to build that root manager using that branch.
+- Multiple selected root managers produce separate kernel builds.
+- Enter `N` for all six to build **No Root** (without a manager APK).
 
-Each selected root gets its own kernel build and manager lookup. The `verified` commit mode retains audited pins on the relevant default branches when SUSFS is on; custom branch names always resolve to their current tips. If you turn SUSFS off while keeping KernelSU-Next selected, change its prefilled `dev-susfs` to `dev`. `KowSU` cannot be combined with SUSFS; `FinaSU` requires SUSFS. Install the matching manager after flashing a rooted build; see [Post-install Setup](post-install.md).
+The fields initially contain `dev-susfs` (KernelSU-Next), `main` (KernelSU), `main` (BakaSU), and `N` for the other three. The usual source branch for each method is listed in its field description. If you turn SUSFS off while keeping KernelSU-Next selected, change `dev-susfs` to `dev`. `KowSU` requires SUSFS off; `FinaSU` requires SUSFS on. Install the matching manager after flashing a rooted build; see [Post-install Setup](post-install.md).
 
 ### Example: Current Android 15 / Linux 6.6 LTS
 
@@ -177,7 +173,8 @@ gh run watch \
 
 - `verified` is the recommended normal mode. It uses verified commits for components that the workflow pins.
 - `latest` resolves supported components from their current branch tips when the run starts.
-- `update` builds latest component tips and can edit, commit, and push verified pins back to the selected branch. Use it only when deliberately maintaining those pins. In the current workflow, the promotion job is skipped when **Kernel Version** selects only one family; it is intended for the all-family maintenance path, not the single-kernel path in this guide.
+
+**Custom root branches always use their latest tip**, even when `verified` is selected.
 
 Even `verified` is not a complete lockfile: the Android kernel branch, KernelSU-Next, some patch/helper repositories, managers, and other components can still be fetched from moving upstream tips. Keep the workflow run URL and the matching `BuildInfo` artifact for provenance.
 
@@ -271,7 +268,7 @@ Open the selected family's JSON file under [`.github/config/`](../.github/config
 
 ### The workflow creates more jobs than expected
 
-Cancel the run and check **Kernel Version**, **OS patch level**, and the six root branch fields. Use one kernel family and one patch level, then enter `N` for unwanted prefilled roots and leave other unused fields blank.
+Cancel the run and check **Kernel Version**, **OS patch level**, and the six root branch fields. Use one kernel family and one patch level, then enter `N` for every unwanted root.
 
 ### Release or cache steps fail with a permission error
 
