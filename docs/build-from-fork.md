@@ -78,6 +78,8 @@ Recommended settings for a first build:
 | Feature toggles | Keep the defaults initially | Establishes a known baseline before customizing features. |
 | Test release notes | `false` | `true` skips the kernel builds and only previews release notes. |
 
+Available root implementations are `KernelSU-Next`, `KernelSU`, `BakaSU`, `SukiSU-Ultra`, `KowSU`, `FinaSU`, or `No Root`; select an implementation by entering its branch, or build `No Root` by entering `N` in all six branch fields.
+
 Each root manager has its own branch field:
 
 - Enter `N` to skip that root manager.
