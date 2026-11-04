@@ -7,6 +7,10 @@ inputs:
   commit:
     description: 'Full immutable commit SHA'
     required: true
+  branch:
+    description: 'Branch chosen in the build form (commit remains pinned to its resolved SHA)'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -14,6 +18,8 @@ runs:
     - name: Clone and integrate selected root
       shell: bash
       working-directory: ${{ github.workspace }}/kernel
+      env:
+        ROOT_SOURCE_BRANCH: ${{ inputs.branch }}
       run: |
         set -euo pipefail
 
@@ -94,6 +100,7 @@ runs:
           echo "Root commit mismatch: expected $expected_commit, got $actual_commit." >&2
           exit 1
         fi
+        echo "[+] Selected $flavor branch: ${ROOT_SOURCE_BRANCH:-unspecified} (${actual_commit:0:12})"
 
         # ---- deterministic KSU version -------------------------------------
         # kernel/Kbuild derives KSU_VERSION from git: BASE_BRANCH comes from

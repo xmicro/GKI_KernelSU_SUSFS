@@ -43,6 +43,10 @@ on:
         required: false
         type: string
         default: ""
+      root_branch:
+        required: false
+        type: string
+        default: ""
       nomount_commit:
         required: false
         type: string
@@ -244,6 +248,7 @@ jobs:
         with:
           flavor: ${{ inputs.root_flavor }}
           commit: ${{ inputs.root_commit }}
+          branch: ${{ inputs.root_branch }}
 
       - name: Mark No Root build metadata
         if: inputs.root_flavor == 'none'

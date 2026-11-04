@@ -61,6 +61,7 @@ runs:
         INPUT_BAKASU_COMMIT: ${{ inputs.bakasu_commit }}
         INPUT_SUKISU_ULTRA_COMMIT: ${{ inputs.sukisu_ultra_commit }}
         INPUT_FINASU_COMMIT: ${{ inputs.finasu_commit }}
+        INPUT_ROOT_MATRIX: ${{ inputs.root_matrix }}
       run: |
         set -euo pipefail
 
@@ -143,13 +144,21 @@ runs:
           return 0
         }
 
+        matrix_branch() { # flavor
+          [[ -z "${INPUT_ROOT_MATRIX:-}" ]] && return 0
+          jq -r --arg f "$1" \
+            'map(select(.root_flavor == $f))[0].root_branch // empty' \
+            <<< "$INPUT_ROOT_MATRIX"
+        }
+
         REC=""
         resolve_one() { # flavor
           local flavor="$1"
-          local owner repo wf branch want stock pinned run_id mc note=""
+          local owner repo wf branch want stock pinned run_id mc selected_branch note=""
           # Exact commit this flavor's kernel embeds (empty when called from
           # managers.yml, which pins through the individual *_commit inputs).
           mc="$(matrix_commit "$flavor")"
+          selected_branch="$(matrix_branch "$flavor")"
           [[ "$flavor" == "next-susfs" ]] && mc="$(matrix_commit next)"
           case "$flavor" in
             next)
@@ -184,29 +193,29 @@ runs:
               ;;
             kernelsu)
               owner="tiann"; repo="KernelSU"; wf="build-manager.yml"
-              branch="main"; want="manager"
-              resolve_stock "${mc:-${INPUT_KSU_COMMIT:-}}" kernelsu_commit https://github.com/tiann/KernelSU.git main
+              branch="${selected_branch:-main}"; want="manager"
+              resolve_stock "${mc:-${INPUT_KSU_COMMIT:-}}" kernelsu_commit https://github.com/tiann/KernelSU.git "$branch"
               ;;
             bakasu)
               owner="Baka-SU"; repo="BakaSU"; wf="build-manager.yml"
-              branch="main"; want="Manager-release,Spoofed-Manager-release"
-              resolve_stock "${mc:-${INPUT_BAKASU_COMMIT:-}}" bakasu_commit https://github.com/Baka-SU/BakaSU.git main
+              branch="${selected_branch:-main}"; want="Manager-release,Spoofed-Manager-release"
+              resolve_stock "${mc:-${INPUT_BAKASU_COMMIT:-}}" bakasu_commit https://github.com/Baka-SU/BakaSU.git "$branch"
               ;;
             sukisu-ultra)
               owner="SukiSU-Ultra"; repo="SukiSU-Ultra"; wf="build-manager.yml"
-              branch="main"; want="Manager,Spoofed-Manager"
-              resolve_stock "${mc:-${INPUT_SUKISU_ULTRA_COMMIT:-}}" sukisu_ultra_commit https://github.com/SukiSU-Ultra/SukiSU-Ultra.git main
+              branch="${selected_branch:-main}"; want="Manager,Spoofed-Manager"
+              resolve_stock "${mc:-${INPUT_SUKISU_ULTRA_COMMIT:-}}" sukisu_ultra_commit https://github.com/SukiSU-Ultra/SukiSU-Ultra.git "$branch"
               ;;
             finasu)
               owner="LyraVoid"; repo="FinaSU"; wf="build-manager.yml"
-              branch="master"; want="manager"
-              resolve_stock "${mc:-${INPUT_FINASU_COMMIT:-}}" finasu_commit https://github.com/LyraVoid/FinaSU.git master
+              branch="${selected_branch:-master}"; want="manager"
+              resolve_stock "${mc:-${INPUT_FINASU_COMMIT:-}}" finasu_commit https://github.com/LyraVoid/FinaSU.git "$branch"
               ;;
             kowsu)
-              # KowSU has no SUSFS support and always tracks latest master.
+              # KowSU has no SUSFS support; match the selected source branch.
               owner="KOWX712"; repo="KernelSU"; wf="build-manager.yml"
-              branch="master"; want="manager"
-              resolve_stock "" kowsu_commit https://github.com/KOWX712/KernelSU.git master
+              branch="${selected_branch:-master}"; want="manager"
+              resolve_stock "$mc" kowsu_commit https://github.com/KOWX712/KernelSU.git "$branch"
               ;;
             *)
               echo "skipping unknown flavor: $flavor" >&2

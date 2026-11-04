@@ -31,6 +31,11 @@ on:
         required: false
         type: string
         default: ""
+      root_branch:
+        description: "Selected source branch of the root implementation"
+        required: false
+        type: string
+        default: ""
       nomount_commit:
         description: "Exact NoMount commit"
         required: false
@@ -331,6 +336,7 @@ jobs:
       susfs_commit: ${{ inputs.susfs_commit }}
       root_flavor: ${{ inputs.root_flavor }}
       root_commit: ${{ inputs.root_commit }}
+      root_branch: ${{ inputs.root_branch }}
       nomount_commit: ${{ inputs.nomount_commit }}
       kernel_patches_commit: ${{ inputs.kernel_patches_commit }}
       anykernel3_commit: ${{ inputs.anykernel3_commit }}

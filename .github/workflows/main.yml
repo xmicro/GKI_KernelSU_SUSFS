@@ -54,26 +54,37 @@ on:
         type: boolean
         default: false
       commit_mode:
-        description: "latest = branch tips, verified = audited pins"
+        description: "latest = branch tips; verified = audited pins. Custom root branches use their latest tip in either mode."
         required: false
         type: choice
         options:
           - latest
           - verified
         default: verified
-      root_flavor:
-        description: "Root Flavor"
-        type: choice
-        options:
-          - KernelSU-Next
-          - KernelSU
-          - BakaSU
-          - SukiSU-Ultra
-          - KowSU
-          - FinaSU
-          - No Root
-          - All (KernelSU-Next + KernelSU + BakaSU)
-        default: All (KernelSU-Next + KernelSU + BakaSU)
+      root_next_branch:
+        description: "N = skip. Usual branch: dev-susfs (SUSFS on), dev (off)."
+        type: string
+        default: dev-susfs
+      root_kernelsu_branch:
+        description: "N = skip. Usual branch: main."
+        type: string
+        default: main
+      root_bakasu_branch:
+        description: "N = skip. Usual branch: main."
+        type: string
+        default: main
+      root_sukisu_ultra_branch:
+        description: "N = skip. Usual branch: builtin (SUSFS on), main (off)."
+        type: string
+        default: N
+      root_kowsu_branch:
+        description: "N = skip. Usual branch: master. Requires SUSFS off."
+        type: string
+        default: N
+      root_finasu_branch:
+        description: "N = skip. Usual branch: master. Requires SUSFS on."
+        type: string
+        default: N
       use_susfs:
         description: "SUSFS"
         type: boolean
@@ -195,6 +206,13 @@ jobs:
       - name: Resolve latest component commits
         id: resolve
         shell: bash
+        env:
+          ROOT_NEXT_BRANCH: ${{ inputs.root_next_branch }}
+          ROOT_KERNELSU_BRANCH: ${{ inputs.root_kernelsu_branch }}
+          ROOT_BAKASU_BRANCH: ${{ inputs.root_bakasu_branch }}
+          ROOT_SUKISU_ULTRA_BRANCH: ${{ inputs.root_sukisu_ultra_branch }}
+          ROOT_KOWSU_BRANCH: ${{ inputs.root_kowsu_branch }}
+          ROOT_FINASU_BRANCH: ${{ inputs.root_finasu_branch }}
         run: |
           set -euo pipefail
 
@@ -314,51 +332,87 @@ jobs:
           emit kernelsu_commit "$(resolve_sha https://github.com/KernelSU-Next/KernelSU-Next.git refs/heads/dev)"
           echo "kernelsu_branch=dev" >> "$GITHUB_OUTPUT"
 
-          # Selected root implementation(s). Maps the human-facing choice
-          # (KernelSU-Next / KernelSU / BakaSU / SukiSU-Ultra / KowSU /
-          # No Root / All) to internal root-setup flavors (next / kernelsu /
-          # bakasu / sukisu-ultra / kowsu / none). 'All' emits a matrix of
-          # the three core root flavors plus each pinned commit; SukiSU-Ultra,
-          # KowSU, and No Root are opt-in only and never part of 'All'.
-          #
-          # kernelsu, bakasu, and sukisu-ultra pin in verified mode;
-          # KernelSU-Next (next) always builds at latest.
-          # With SUSFS off, every root tracks latest instead of pins:
-          # SukiSU-Ultra follows main (builtin only matters for SUSFS builds).
-          # Scheduled runs default SUSFS on (all features on, see the
-          # feature_set computation) - a nightly is a full-featured build.
+          # Each nonempty branch selects one root variant. N explicitly skips,
+          # since GitHub may restore a declared default when a field is cleared.
+          # Already-empty (non-prefilled) fields also skip.
+          # Scheduled runs (if re-enabled) use the three original core flavors.
           if [ "${{ github.event_name }}" = "schedule" ]; then
             SCHED_SUSFS=true
+            ROOT_NEXT_BRANCH=dev-susfs
+            ROOT_KERNELSU_BRANCH=main
+            ROOT_BAKASU_BRANCH=main
+            ROOT_SUKISU_ULTRA_BRANCH=""
+            ROOT_KOWSU_BRANCH=""
+            ROOT_FINASU_BRANCH=""
           else
             SCHED_SUSFS="${{ inputs.use_susfs }}"
           fi
-          if [ "$SCHED_SUSFS" = "true" ]; then
-            KERNELSU_COMMIT="$(pick "$PIN_KERNELSU" https://github.com/tiann/KernelSU.git refs/heads/main)"
-            BAKASU_COMMIT="$(pick "$PIN_BAKASU" https://github.com/Baka-SU/BakaSU.git refs/heads/main)"
-            SUKISU_ULTRA_COMMIT="$(pick "$PIN_SUKISU_ULTRA" https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/builtin)"
-            FINASU_COMMIT="$(pick "$PIN_FINASU" https://github.com/LyraVoid/FinaSU.git refs/heads/master)"
-          else
-            KERNELSU_COMMIT="$(resolve_sha https://github.com/tiann/KernelSU.git refs/heads/main)"
-            BAKASU_COMMIT="$(resolve_sha https://github.com/Baka-SU/BakaSU.git refs/heads/main)"
-            SUKISU_ULTRA_COMMIT="$(resolve_sha https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/main)"
-            FINASU_COMMIT="$(resolve_sha https://github.com/LyraVoid/FinaSU.git refs/heads/master)"
+          # Normalize the explicit opt-out before validating refs or creating
+          # the matrix. An uppercase N is reserved and cannot name a branch.
+          [ "$ROOT_NEXT_BRANCH" = "N" ] && ROOT_NEXT_BRANCH=""
+          [ "$ROOT_KERNELSU_BRANCH" = "N" ] && ROOT_KERNELSU_BRANCH=""
+          [ "$ROOT_BAKASU_BRANCH" = "N" ] && ROOT_BAKASU_BRANCH=""
+          [ "$ROOT_SUKISU_ULTRA_BRANCH" = "N" ] && ROOT_SUKISU_ULTRA_BRANCH=""
+          [ "$ROOT_KOWSU_BRANCH" = "N" ] && ROOT_KOWSU_BRANCH=""
+          [ "$ROOT_FINASU_BRANCH" = "N" ] && ROOT_FINASU_BRANCH=""
+          for branch in "$ROOT_NEXT_BRANCH" "$ROOT_KERNELSU_BRANCH" "$ROOT_BAKASU_BRANCH" \
+                        "$ROOT_SUKISU_ULTRA_BRANCH" "$ROOT_KOWSU_BRANCH" "$ROOT_FINASU_BRANCH"; do
+            [ -z "$branch" ] || git check-ref-format --branch "$branch" >/dev/null || {
+              echo "ERROR: invalid root branch name: $branch" >&2
+              exit 1
+            }
+          done
+          if [ -n "$ROOT_KOWSU_BRANCH" ] && [ "$SCHED_SUSFS" = "true" ]; then
+            echo "ERROR: KowSU requires SUSFS off. Clear KowSU's branch or disable SUSFS." >&2
+            exit 1
           fi
-          emit ksu_commit "$KERNELSU_COMMIT"
-          emit bakasu_commit "$BAKASU_COMMIT"
-          emit sukisu_ultra_commit "$SUKISU_ULTRA_COMMIT"
-          # FinaSU ships susfs kernel-side and hard-depends on it (unguarded
-          # linux/susfs.h includes), so it is only valid with SUSFS on;
-          # susfs-off finasu builds are rejected in build.yml.
-          emit finasu_commit "$FINASU_COMMIT"
-          # KowSU has no SUSFS support, so it always tracks latest on master
-          # (it can only ever run with SUSFS off — enforced below).
-          KOWSU_COMMIT="$(resolve_sha https://github.com/KOWX712/KernelSU.git refs/heads/master)"
-          emit kowsu_commit "$KOWSU_COMMIT"
-          if [ "$SCHED_SUSFS" = "true" ]; then
-            NEXT_COMMIT="$(resolve_sha https://github.com/pershoot/KernelSU-Next.git refs/heads/dev-susfs)"
-          else
-            NEXT_COMMIT="$(resolve_sha https://github.com/KernelSU-Next/KernelSU-Next.git refs/heads/dev)"
+          if [ -n "$ROOT_FINASU_BRANCH" ] && [ "$SCHED_SUSFS" != "true" ]; then
+            echo "ERROR: FinaSU requires SUSFS on. Clear FinaSU's branch or enable SUSFS." >&2
+            exit 1
           fi
+
+          # Keep verified pins on the historic default branches. Custom
+          # branches always resolve their own current tip even in verified mode.
+          selected_sha() { # branch default pin repo
+            local branch="$1" default="$2" pin="$3" repo="$4"
+            if [ "$SCHED_SUSFS" = "true" ] && [ "$branch" = "$default" ]; then
+              pick "$pin" "$repo" "refs/heads/$branch"
+            else
+              resolve_sha "$repo" "refs/heads/$branch"
+            fi
+          }
+          KERNELSU_COMMIT="" BAKASU_COMMIT="" SUKISU_ULTRA_COMMIT=""
+          FINASU_COMMIT="" KOWSU_COMMIT="" NEXT_COMMIT=""
+          if [ -n "$ROOT_KERNELSU_BRANCH" ]; then
+            KERNELSU_COMMIT="$(selected_sha "$ROOT_KERNELSU_BRANCH" main "$PIN_KERNELSU" https://github.com/tiann/KernelSU.git)"
+          fi
+          if [ -n "$ROOT_BAKASU_BRANCH" ]; then
+            BAKASU_COMMIT="$(selected_sha "$ROOT_BAKASU_BRANCH" main "$PIN_BAKASU" https://github.com/Baka-SU/BakaSU.git)"
+          fi
+          if [ -n "$ROOT_SUKISU_ULTRA_BRANCH" ]; then
+            SUKISU_PIN=""
+            [ "$SCHED_SUSFS" = "true" ] && SUKISU_PIN="$PIN_SUKISU_ULTRA"
+            SUKISU_ULTRA_COMMIT="$(selected_sha "$ROOT_SUKISU_ULTRA_BRANCH" builtin "$SUKISU_PIN" https://github.com/SukiSU-Ultra/SukiSU-Ultra.git)"
+          fi
+          if [ -n "$ROOT_FINASU_BRANCH" ]; then
+            FINASU_COMMIT="$(selected_sha "$ROOT_FINASU_BRANCH" master "$PIN_FINASU" https://github.com/LyraVoid/FinaSU.git)"
+          fi
+          if [ -n "$ROOT_KOWSU_BRANCH" ]; then
+            KOWSU_COMMIT="$(resolve_sha https://github.com/KOWX712/KernelSU.git "refs/heads/$ROOT_KOWSU_BRANCH")"
+          fi
+          if [ -n "$ROOT_NEXT_BRANCH" ]; then
+            if [ "$SCHED_SUSFS" = "true" ]; then
+              NEXT_COMMIT="$(resolve_sha https://github.com/pershoot/KernelSU-Next.git "refs/heads/$ROOT_NEXT_BRANCH")"
+            else
+              NEXT_COMMIT="$(resolve_sha https://github.com/KernelSU-Next/KernelSU-Next.git "refs/heads/$ROOT_NEXT_BRANCH")"
+            fi
+          fi
+          for entry in "ksu_commit:$KERNELSU_COMMIT" "bakasu_commit:$BAKASU_COMMIT" \
+                       "sukisu_ultra_commit:$SUKISU_ULTRA_COMMIT" "finasu_commit:$FINASU_COMMIT" \
+                       "kowsu_commit:$KOWSU_COMMIT"; do
+            key="${entry%%:*}"; sha="${entry#*:}"
+            if [ -n "$sha" ]; then emit "$key" "$sha"; else echo "$key=" >> "$GITHUB_OUTPUT"; fi
+          done
 
           # The kernel reports 30000 + count(merge-base(KSU HEAD, upstream dev))
           # -- see .github/actions/root-setup. The manager has to be resolved at
@@ -366,7 +420,7 @@ jobs:
           # fork-only SHA with no manager CI behind it, and pairing a manager
           # from a different commit is what let a kernel reporting 33405 sit
           # next to a manager reporting 33442.
-          if [ "$SCHED_SUSFS" = "true" ]; then
+          if [ -n "$NEXT_COMMIT" ] && [ "$SCHED_SUSFS" = "true" ]; then
             # Compare within the fork first: pershoot mirrors upstream dev, and
             # the path needs no owner:branch colon. Across-repo compare is the
             # fallback. curl with an explicit token on purpose -- `gh` is not
@@ -374,8 +428,8 @@ jobs:
             # base on run 41005208268 and left the pairing to the fallback.
             NEXT_BASE=""
             for cmp_url in \
-              "https://api.github.com/repos/pershoot/KernelSU-Next/compare/dev...dev-susfs" \
-              "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/compare/dev...pershoot:dev-susfs"; do
+              "https://api.github.com/repos/pershoot/KernelSU-Next/compare/dev...${ROOT_NEXT_BRANCH}" \
+              "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/compare/dev...pershoot:${ROOT_NEXT_BRANCH}"; do
               NEXT_BASE="$(curl -fsSL --max-time 30 --retry 3 \
                 -H "Authorization: Bearer ${{ github.token }}" \
                 -H "Accept: application/vnd.github+json" \
@@ -392,73 +446,46 @@ jobs:
           else
             NEXT_BASE="$NEXT_COMMIT"
           fi
-          emit next_base_commit "$NEXT_BASE"
+          if [ -n "$NEXT_BASE" ]; then emit next_base_commit "$NEXT_BASE"; else echo "next_base_commit=" >> "$GITHUB_OUTPUT"; fi
 
-          mk_entry() { # flavor variant commit produce
-            printf '{"root_flavor":"%s","variant":"%s","root_commit":"%s","produce":%s}' "$1" "$2" "$3" "$4"
+          mk_entry() { # flavor variant commit branch produce
+            jq -cn --arg flavor "$1" --arg variant "$2" --arg commit "$3" \
+              --arg branch "$4" --argjson produce "$5" \
+              '{root_flavor:$flavor,variant:$variant,root_commit:$commit,root_branch:$branch,produce:$produce}'
           }
-
-          # On 'schedule' there are no inputs, so the default must be the exact
-          # label the "All" arm matches below — a bare 'All' fell through to *)
-          # and failed the whole job, yet the manager step's All* glob still
-          # matched, so the two steps disagreed. Keep these in sync.
-          case "${{ inputs.root_flavor || 'All (KernelSU-Next + KernelSU + BakaSU)' }}" in
-            KernelSU)
-              echo "root_flavor=kernelsu" >> "$GITHUB_OUTPUT"
-              emit root_commit "$KERNELSU_COMMIT"
-              ROOT_MATRIX="[$(mk_entry kernelsu KernelSU "$KERNELSU_COMMIT" true)]"
-              ;;
-            KernelSU-Next)
-              echo "root_flavor=next" >> "$GITHUB_OUTPUT"
-              emit root_commit "$NEXT_COMMIT"
-              ROOT_MATRIX="[$(mk_entry next KernelSU-Next "$NEXT_COMMIT" true)]"
-              ;;
-            BakaSU)
-              echo "root_flavor=bakasu" >> "$GITHUB_OUTPUT"
-              emit root_commit "$BAKASU_COMMIT"
-              ROOT_MATRIX="[$(mk_entry bakasu BakaSU "$BAKASU_COMMIT" true)]"
-              ;;
-            SukiSU-Ultra)
-              echo "root_flavor=sukisu-ultra" >> "$GITHUB_OUTPUT"
-              emit root_commit "$SUKISU_ULTRA_COMMIT"
-              ROOT_MATRIX="[$(mk_entry sukisu-ultra SukiSU-Ultra "$SUKISU_ULTRA_COMMIT" true)]"
-              ;;
-            FinaSU)
-              if [ "${{ inputs.use_susfs }}" = "false" ]; then
-                echo "ERROR: FinaSU requires SUSFS — re-run with SUSFS on." >&2
-                exit 1
-              fi
-              echo "root_flavor=finasu" >> "$GITHUB_OUTPUT"
-              emit root_commit "$FINASU_COMMIT"
-              ROOT_MATRIX="[$(mk_entry finasu FinaSU "$FINASU_COMMIT" true)]"
-              ;;
-            KowSU)
-              if [ "${{ inputs.use_susfs }}" = "true" ]; then
-                echo "ERROR: KowSU does not work together with SUSFS — re-run with SUSFS off." >&2
-                exit 1
-              fi
-              echo "root_flavor=kowsu" >> "$GITHUB_OUTPUT"
-              emit root_commit "$KOWSU_COMMIT"
-              ROOT_MATRIX="[$(mk_entry kowsu KowSU "$KOWSU_COMMIT" true)]"
-              ;;
-            "No Root")
-              echo "root_flavor=none" >> "$GITHUB_OUTPUT"
-              echo "root_commit=" >> "$GITHUB_OUTPUT"
-              ROOT_MATRIX='[{"root_flavor":"none","variant":"NoRoot","root_commit":""}]'
-              ROOT_MATRIX="[$(mk_entry none NoRoot "" true)]"
-              ;;
-            "All (KernelSU-Next + KernelSU + BakaSU)")
-              # Fan out to all three root variants, each with its pinned commit.
-              ROOT_MATRIX="[$(mk_entry next KernelSU-Next "$NEXT_COMMIT" true),$(mk_entry kernelsu KernelSU "$KERNELSU_COMMIT" false),$(mk_entry bakasu BakaSU "$BAKASU_COMMIT" false)]"
-              echo "root_flavor=" >> "$GITHUB_OUTPUT"
-              echo "root_commit=" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "ERROR: unknown root_flavor '${{ inputs.root_flavor }}'" >&2
-              exit 1
-              ;;
-          esac
+          ROOT_ENTRIES=()
+          SELECTED_FLAVORS=()
+          add_root() { # flavor variant commit branch
+            local produce=false
+            [ "${#ROOT_ENTRIES[@]}" -eq 0 ] && produce=true
+            if [ "$1" != none ]; then
+              emit "checked_${1//-/_}_commit" "$3"
+              SELECTED_FLAVORS+=("$1")
+            fi
+            ROOT_ENTRIES+=("$(mk_entry "$1" "$2" "$3" "$4" "$produce")")
+          }
+          [ -z "$ROOT_NEXT_BRANCH" ]         || add_root next KernelSU-Next "$NEXT_COMMIT" "$ROOT_NEXT_BRANCH"
+          [ -z "$ROOT_KERNELSU_BRANCH" ]     || add_root kernelsu KernelSU "$KERNELSU_COMMIT" "$ROOT_KERNELSU_BRANCH"
+          [ -z "$ROOT_BAKASU_BRANCH" ]       || add_root bakasu BakaSU "$BAKASU_COMMIT" "$ROOT_BAKASU_BRANCH"
+          [ -z "$ROOT_SUKISU_ULTRA_BRANCH" ] || add_root sukisu-ultra SukiSU-Ultra "$SUKISU_ULTRA_COMMIT" "$ROOT_SUKISU_ULTRA_BRANCH"
+          [ -z "$ROOT_KOWSU_BRANCH" ]        || add_root kowsu KowSU "$KOWSU_COMMIT" "$ROOT_KOWSU_BRANCH"
+          [ -z "$ROOT_FINASU_BRANCH" ]       || add_root finasu FinaSU "$FINASU_COMMIT" "$ROOT_FINASU_BRANCH"
+          if [ "${#ROOT_ENTRIES[@]}" -eq 0 ]; then
+            add_root none NoRoot "" ""
+          fi
+          ROOT_MATRIX="$(printf '%s\n' "${ROOT_ENTRIES[@]}" | jq -cs '.')"
           echo "root_matrix=$ROOT_MATRIX" >> "$GITHUB_OUTPUT"
+          echo "manager_flavors=$(IFS=,; echo "${SELECTED_FLAVORS[*]}")" >> "$GITHUB_OUTPUT"
+          if [ "${#SELECTED_FLAVORS[@]}" -eq 1 ]; then
+            echo "root_flavor=${SELECTED_FLAVORS[0]}" >> "$GITHUB_OUTPUT"
+            emit root_commit "$(jq -r '.[0].root_commit' <<< "$ROOT_MATRIX")"
+          elif [ "${#SELECTED_FLAVORS[@]}" -eq 0 ]; then
+            echo "root_flavor=none" >> "$GITHUB_OUTPUT"
+            echo "root_commit=" >> "$GITHUB_OUTPUT"
+          else
+            echo "root_flavor=All" >> "$GITHUB_OUTPUT"
+            echo "root_commit=" >> "$GITHUB_OUTPUT"
+          fi
 
           # SUSFS per supported Android/kernel branch (gitlab simonpunk/susfs4ksu).
           # Always emit the verified pinned SHA here; build.yml overrides to the
@@ -494,8 +521,8 @@ jobs:
         # APK pipeline (managers.yml): .github/actions/resolve-managers.
         uses: ./.github/actions/resolve-managers
         with:
-          root_flavor: ${{ inputs.root_flavor }}
-          all_flavors: next,kernelsu,bakasu
+          root_flavor: ${{ steps.resolve.outputs.manager_flavors != '' && 'All' || 'none' }}
+          all_flavors: ${{ steps.resolve.outputs.manager_flavors }}
           allow_fallback: 'true'
           root_matrix: ${{ steps.resolve.outputs.root_matrix }}
           next_commit: ${{ steps.resolve.outputs.next_base_commit }}
@@ -670,6 +697,7 @@ jobs:
       root_flavor: ${{ matrix.root.root_flavor }}
       produce_stock_configs: ${{ matrix.root.produce }}
       root_commit: ${{ matrix.root.root_commit }}
+      root_branch: ${{ matrix.root.root_branch }}
       variant: ${{ matrix.root.variant }}
       ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
       anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
@@ -700,6 +728,7 @@ jobs:
       root_flavor: ${{ matrix.root.root_flavor }}
       produce_stock_configs: ${{ matrix.root.produce }}
       root_commit: ${{ matrix.root.root_commit }}
+      root_branch: ${{ matrix.root.root_branch }}
       variant: ${{ matrix.root.variant }}
       ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
       anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
@@ -730,6 +759,7 @@ jobs:
       root_flavor: ${{ matrix.root.root_flavor }}
       produce_stock_configs: ${{ matrix.root.produce }}
       root_commit: ${{ matrix.root.root_commit }}
+      root_branch: ${{ matrix.root.root_branch }}
       variant: ${{ matrix.root.variant }}
       ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
       anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
@@ -760,6 +790,7 @@ jobs:
       root_flavor: ${{ matrix.root.root_flavor }}
       produce_stock_configs: ${{ matrix.root.produce }}
       root_commit: ${{ matrix.root.root_commit }}
+      root_branch: ${{ matrix.root.root_branch }}
       variant: ${{ matrix.root.variant }}
       ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
       anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
@@ -790,6 +821,7 @@ jobs:
       root_flavor: ${{ matrix.root.root_flavor }}
       produce_stock_configs: ${{ matrix.root.produce }}
       root_commit: ${{ matrix.root.root_commit }}
+      root_branch: ${{ matrix.root.root_branch }}
       variant: ${{ matrix.root.variant }}
       ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
       anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
@@ -820,6 +852,7 @@ jobs:
       root_flavor: ${{ matrix.root.root_flavor }}
       produce_stock_configs: ${{ matrix.root.produce }}
       root_commit: ${{ matrix.root.root_commit }}
+      root_branch: ${{ matrix.root.root_branch }}
       variant: ${{ matrix.root.variant }}
       ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
       anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
@@ -850,6 +883,7 @@ jobs:
       root_flavor: ${{ matrix.root.root_flavor }}
       produce_stock_configs: ${{ matrix.root.produce }}
       root_commit: ${{ matrix.root.root_commit }}
+      root_branch: ${{ matrix.root.root_branch }}
       variant: ${{ matrix.root.variant }}
       ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
       anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
@@ -885,6 +919,7 @@ jobs:
       root_flavor: ${{ matrix.root.root_flavor }}
       produce_stock_configs: ${{ matrix.root.produce }}
       root_commit: ${{ matrix.root.root_commit }}
+      root_branch: ${{ matrix.root.root_branch }}
       variant: ${{ matrix.root.variant }}
       ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
       anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
@@ -1819,7 +1854,7 @@ jobs:
         with:
           mode: kernel
         env:
-          ROOT_FLAVOR: ${{ inputs.root_flavor }}
+          ROOT_FLAVOR: ${{ needs.resolve-sources.outputs.root_flavor }}
           FEATURE_SET: ${{ needs.resolve-sources.outputs.feature_set }}
           MANAGER_LIST: ${{ needs.resolve-sources.outputs.manager_list }}
           ROOT_MATRIX: ${{ needs.resolve-sources.outputs.root_matrix }}
