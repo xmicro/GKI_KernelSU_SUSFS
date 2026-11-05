@@ -524,6 +524,7 @@ jobs:
           root_flavor: ${{ steps.resolve.outputs.manager_flavors != '' && 'All' || 'none' }}
           all_flavors: ${{ steps.resolve.outputs.manager_flavors }}
           allow_fallback: 'true'
+          susfs_enabled: ${{ github.event_name == 'schedule' || inputs.use_susfs }}
           root_matrix: ${{ steps.resolve.outputs.root_matrix }}
           next_commit: ${{ steps.resolve.outputs.next_base_commit }}
           finasu_commit: ${{ steps.resolve.outputs.finasu_commit }}

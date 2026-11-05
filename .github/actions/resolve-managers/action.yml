@@ -13,6 +13,10 @@ inputs:
     description: 'true = fall back to the latest successful manager run even for an explicit pin; false = an explicit pin must have its own run (only unpinned flavors fall back)'
     required: false
     default: 'true'
+  susfs_enabled:
+    description: 'Whether the main kernel build uses SUSFS; true preserves KernelSU-Next fork-to-official Manager matching. Defaults to true for existing standalone Manager callers.'
+    required: false
+    default: 'true'
   next_commit:
     description: 'KernelSU-Next commit to match (empty = resolve the dev tip)'
     required: false
@@ -55,6 +59,7 @@ runs:
         INPUT_ROOT_FLAVOR: ${{ inputs.root_flavor }}
         INPUT_ALL_FLAVORS: ${{ inputs.all_flavors }}
         INPUT_ALLOW_FALLBACK: ${{ inputs.allow_fallback }}
+        INPUT_SUSFS_ENABLED: ${{ inputs.susfs_enabled }}
         INPUT_NEXT_COMMIT: ${{ inputs.next_commit }}
         INPUT_NEXT_SUSFS_COMMIT: ${{ inputs.next_susfs_commit }}
         INPUT_KSU_COMMIT: ${{ inputs.kernelsu_commit }}
@@ -154,7 +159,7 @@ runs:
         REC=""
         resolve_one() { # flavor
           local flavor="$1"
-          local owner repo wf branch want stock pinned run_id mc selected_branch note=""
+          local owner repo wf branch default_branch want stock pinned run_id mc selected_branch requested_commit note=""
           # Exact commit this flavor's kernel embeds (empty when called from
           # managers.yml, which pins through the individual *_commit inputs).
           mc="$(matrix_commit "$flavor")"
@@ -163,13 +168,19 @@ runs:
           case "$flavor" in
             next)
               owner="KernelSU-Next"; repo="KernelSU-Next"; wf="build-manager-ci.yml"
-              branch="dev"; want="manager,manager-spoofed"
-              resolve_stock "${mc:-${INPUT_NEXT_COMMIT:-}}" kernelsu_next_commit https://github.com/KernelSU-Next/KernelSU-Next.git dev
+              default_branch="dev"; branch="dev"; want="manager,manager-spoofed"
+              # SUSFS off uses the selected official source branch first, like
+              # the other roots. SUSFS on retains its original official-dev
+              # Manager pairing for the pershoot kernel source.
+              if [[ "${INPUT_SUSFS_ENABLED:-true}" != "true" ]]; then
+                branch="${selected_branch:-dev}"
+              fi
+              resolve_stock "${mc:-${INPUT_NEXT_COMMIT:-}}" kernelsu_next_commit https://github.com/KernelSU-Next/KernelSU-Next.git "$branch"
               # With SUSFS on, the matrix carries a pershoot dev-susfs commit --
               # a fork-only SHA. The kernel reports the version of its merge base
               # with upstream dev, so pair the manager with that same upstream
               # commit instead of falling back to an unrelated tip.
-              if [[ "$PINNED" == "1" && -n "$STOCK" ]] \
+              if [[ "${INPUT_SUSFS_ENABLED:-true}" == "true" && "$PINNED" == "1" && -n "$STOCK" ]] \
                  && [[ -z "$(find_run "$owner" "$repo" "$wf" "$STOCK")" ]]; then
                 if [[ -n "$(find_run pershoot KernelSU-Next "$wf" "$STOCK")" ]]; then
                   echo "using pershoot fork manager CI for ${STOCK:0:12}" >&2
@@ -183,7 +194,7 @@ runs:
               ;;
             next-susfs)
               owner="pershoot"; repo="KernelSU-Next"; wf="build-manager-ci.yml"
-              branch="dev-susfs"; want="manager,manager-spoofed"
+              default_branch="dev-susfs"; branch="dev-susfs"; want="manager,manager-spoofed"
               resolve_stock "${mc:-${INPUT_NEXT_SUSFS_COMMIT:-}}" kernelsu_next_susfs_commit https://github.com/pershoot/KernelSU-Next.git dev-susfs
               if [[ -z "$STOCK" && -z "${INPUT_NEXT_SUSFS_COMMIT:-}" ]]; then
                 # pershoot fork unreachable: fall back to upstream dev-susfs tip.
@@ -193,28 +204,28 @@ runs:
               ;;
             kernelsu)
               owner="tiann"; repo="KernelSU"; wf="build-manager.yml"
-              branch="${selected_branch:-main}"; want="manager"
+              default_branch="main"; branch="${selected_branch:-main}"; want="manager"
               resolve_stock "${mc:-${INPUT_KSU_COMMIT:-}}" kernelsu_commit https://github.com/tiann/KernelSU.git "$branch"
               ;;
             bakasu)
               owner="Baka-SU"; repo="BakaSU"; wf="build-manager.yml"
-              branch="${selected_branch:-main}"; want="Manager-release,Spoofed-Manager-release"
+              default_branch="main"; branch="${selected_branch:-main}"; want="Manager-release,Spoofed-Manager-release"
               resolve_stock "${mc:-${INPUT_BAKASU_COMMIT:-}}" bakasu_commit https://github.com/Baka-SU/BakaSU.git "$branch"
               ;;
             sukisu-ultra)
               owner="SukiSU-Ultra"; repo="SukiSU-Ultra"; wf="build-manager.yml"
-              branch="${selected_branch:-main}"; want="Manager,Spoofed-Manager"
+              default_branch="main"; branch="${selected_branch:-main}"; want="Manager,Spoofed-Manager"
               resolve_stock "${mc:-${INPUT_SUKISU_ULTRA_COMMIT:-}}" sukisu_ultra_commit https://github.com/SukiSU-Ultra/SukiSU-Ultra.git "$branch"
               ;;
             finasu)
               owner="LyraVoid"; repo="FinaSU"; wf="build-manager.yml"
-              branch="${selected_branch:-master}"; want="manager"
+              default_branch="master"; branch="${selected_branch:-master}"; want="manager"
               resolve_stock "${mc:-${INPUT_FINASU_COMMIT:-}}" finasu_commit https://github.com/LyraVoid/FinaSU.git "$branch"
               ;;
             kowsu)
               # KowSU has no SUSFS support; match the selected source branch.
               owner="KOWX712"; repo="KernelSU"; wf="build-manager.yml"
-              branch="${selected_branch:-master}"; want="manager"
+              default_branch="master"; branch="${selected_branch:-master}"; want="manager"
               resolve_stock "$mc" kowsu_commit https://github.com/KOWX712/KernelSU.git "$branch"
               ;;
             *)
@@ -223,7 +234,7 @@ runs:
               return 0
               ;;
           esac
-          stock="$STOCK"; pinned="$PINNED"
+          stock="$STOCK"; pinned="$PINNED"; requested_commit="$STOCK"
 
           run_id="$(find_run "$owner" "$repo" "$wf" "$stock")"
           if [[ -z "$run_id" ]]; then
@@ -241,13 +252,21 @@ runs:
               echo "ERROR: no ${owner}/${repo} manager build exists for pinned commit ${stock}" >&2
               exit 1
             fi
-            echo "No manager build for ${stock:-unknown tip}, falling back to latest successful run" >&2
+            echo "No manager build for ${stock:-unknown tip}; checking latest successful run on selected branch ${branch}" >&2
             note="fallback"
             read -r run_id stock <<< "$(fallback_run "$owner" "$repo" "$wf" "$branch")"
-            if [[ -n "$run_id" ]]; then echo "Fallback to ${stock} run ${run_id}" >&2; fi
+            if [[ -z "$run_id" && "$branch" != "$default_branch" ]]; then
+              echo "WARNING: no Manager CI run on selected branch ${branch}; trying default Manager branch ${default_branch}" >&2
+              read -r run_id stock <<< "$(fallback_run "$owner" "$repo" "$wf" "$default_branch")"
+              [[ -z "$run_id" ]] || note="default-branch-fallback"
+            fi
             if [[ -z "$run_id" ]]; then
-              echo "ERROR: no ${repo} manager build exists for commit ${stock}" >&2
+              echo "ERROR: no ${owner}/${repo} Manager build found for commit ${requested_commit:-unknown} or selected/default branches" >&2
               exit 1
+            fi
+            echo "Manager fallback: ${stock} run ${run_id} (${note})" >&2
+            if [[ -n "$requested_commit" && "$stock" != "$requested_commit" ]]; then
+              echo "WARNING: Manager CI commit ${stock:0:12} differs from requested kernel commit ${requested_commit:0:12}; verify version compatibility" >&2
             fi
           fi
           printf -v REC '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"%s","note":"%s"}' \
