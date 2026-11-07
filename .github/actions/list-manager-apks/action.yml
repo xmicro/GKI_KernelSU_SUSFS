@@ -24,7 +24,7 @@ runs:
         if ! echo "$MANAGER_LIST" | jq empty 2>/dev/null; then
           echo "ERROR: Invalid MANAGER_LIST JSON"
           echo "Raw: $MANAGER_LIST"
-          exit 0
+          exit 1
         fi
         OUT_APKS="${GITHUB_WORKSPACE:-$PWD}/manager_apks"
         MANIFEST="${GITHUB_WORKSPACE:-$PWD}/manifest.txt"
@@ -60,7 +60,11 @@ runs:
               else
                 ART_IDS=$(echo "$AJSON" | jq -r --arg want "$WANT" '
                   ($want | split(",")) as $wl |
-                  .artifacts[] | select(.name as $n | any($wl[]; $n == .)) | "\(.id) \(.name)"')
+                  .artifacts[] | select((.expired | not) and (.name as $n | any($wl[]; $n == .))) | "\(.id) \(.name)"')
+              fi
+              if [ -z "$ART_IDS" ]; then
+                echo "ERROR: run $RUN_ID has no unexpired Manager artifacts matching '$WANT'" >&2
+                exit 1
               fi
               echo "$ART_IDS" | while read -r AID ART_NAME; do
                 [ -n "$AID" ] || continue

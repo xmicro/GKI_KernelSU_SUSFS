@@ -10,7 +10,7 @@ inputs:
     required: false
     default: 'next,kernelsu,bakasu'
   allow_fallback:
-    description: 'true = fall back to the latest successful manager run even for an explicit pin; false = an explicit pin must have its own run (only unpinned flavors fall back)'
+    description: 'true = try equivalent-version and branch/default fallbacks for a missing exact Manager run; false = fail if an explicit kernel commit has no exact Manager run'
     required: false
     default: 'true'
   susfs_enabled:
@@ -72,7 +72,7 @@ runs:
 
         # Credit: authenticated gh-API manager lookup adapted from EmberHeart-Kernels
         # commit ae9a341 (nullptr-t-oss/composite_actions fetch_ksu_manager).
-        # Each selected root must ship ALL manager APK builds. KernelSU-Next publishes
+        # Select available Manager APK builds. KernelSU-Next publishes
         # its manager APKs (manager + manager-spoofed) from the official dev-tip
         # build-manager-ci run; kernelsu (KernelSU), BakaSU, SukiSU-Ultra, FinaSU and
         # KowSU expose theirs as CI-run artifacts. All are pinned to an exact commit.
@@ -124,12 +124,83 @@ runs:
             --jq '.workflow_runs[0].id // empty'
         }
 
-        # Latest successful run on a branch: echoes "<run_id> <head_sha>".
-        fallback_run() { # owner repo wf branch
-          local fb
-          fb=$(gh api "repos/$1/$2/actions/workflows/$3/runs?branch=$4&status=success&per_page=1")
-          printf '%s %s' "$(echo "$fb" | jq -r '.workflow_runs[0].id // empty')" \
-            "$(echo "$fb" | jq -r '.workflow_runs[0].head_sha // empty')"
+        # Latest *usable* Manager run on a branch: echoes "<run_id> <head_sha>".
+        fallback_run() { # owner repo wf branch wanted-artifact-names
+          local fb id sha
+          fb="$(gh api "repos/$1/$2/actions/workflows/$3/runs?branch=$4&status=success&per_page=100")" || return 0
+          while IFS=$'\t' read -r id sha; do
+            [[ -n "$id" && -n "$sha" ]] || continue
+            if run_has_manager "$1" "$2" "$id" "$5"; then
+              printf '%s %s' "$id" "$sha"
+              return 0
+            fi
+          done < <(jq -r '.workflow_runs[]? | [.id, .head_sha] | @tsv' <<< "$fb")
+        }
+
+        # Require the regular Manager artifact, which is listed first in want.
+        # Spoofed variants are optional: some branches/runs do not publish them.
+        # Ignore expired artifacts; the download step checks them again.
+        run_has_manager() { # owner repo run_id wanted-artifact-names
+          local artifacts
+          [[ -z "${3:-}" ]] && return 1
+          artifacts="$(gh api "repos/$1/$2/actions/runs/$3/artifacts?per_page=100")" || return 1
+          jq -e --arg want "$4" '
+            ($want | split(",") | .[0]) as $required |
+            any(.artifacts[]?; (.expired | not) and .name == $required)
+          ' <<< "$artifacts" >/dev/null
+        }
+
+        # A single repo checkout lets us compare version codes across commits.
+        # For these upstream managers the changing part of the version code is
+        # a Git commit count. The additive base is constant per root family,
+        # so equal counts mean equal calculated version codes *within* one root.
+        # SukiSU-Ultra is special: its kernel counts main regardless of source
+        # branch (including builtin), while its Manager counts its own HEAD.
+        # The kernel's remote main count can advance during a build, so this
+        # pre-build comparison is an estimate, not a verified compiled version.
+        VERSION_REPO=""
+        VERSION_DIR=""
+        init_version_repo() { # git URL
+          if [[ "$VERSION_REPO" == "$1" && -n "$VERSION_DIR" ]]; then return 0; fi
+          VERSION_REPO="$1"
+          VERSION_DIR="$(mktemp -d)"
+          if ! retry git clone --quiet --bare --filter=blob:none "$1" "$VERSION_DIR"; then
+            echo "WARNING: unable to inspect Manager version history for $1" >&2
+            VERSION_DIR=""
+            return 1
+          fi
+        }
+
+        version_count() { # git URL commit flavor role (kernel or manager)
+          local url="$1" sha="$2" flavor="$3" role="$4" count=""
+          [[ -n "$sha" ]] || return 0
+          init_version_repo "$url" || return 0
+          if [[ "$flavor" == "sukisu-ultra" && "$role" == "kernel" ]]; then
+            # SukiSU's kernel Kbuild reads main's history even for builtin/dev.
+            count="$(git -C "$VERSION_DIR" rev-list --count refs/heads/main 2>/dev/null || true)"
+          else
+            # SukiSU's Manager and every other root use the checkout's HEAD.
+            count="$(git -C "$VERSION_DIR" rev-list --count "$sha" 2>/dev/null || true)"
+          fi
+          [[ "$count" =~ ^[0-9]+$ ]] && printf '%s' "$count"
+        }
+
+        # Find a successful workflow run from the chosen branch whose
+        # calculated Manager version matches the kernel's version. This checks
+        # more than the newest run: a later commit can advance the version.
+        matching_version_run() { # owner repo workflow branch wanted version git-url flavor
+          local owner="$1" repo="$2" wf="$3" branch="$4" want="$5" target="$6" url="$7" flavor="$8"
+          local runs sha rid version
+          [[ -n "$target" ]] || return 0
+          runs="$(gh api "repos/$owner/$repo/actions/workflows/$wf/runs?branch=$branch&status=success&per_page=100")" || return 0
+          while IFS=$'\t' read -r rid sha; do
+            [[ -n "$rid" && -n "$sha" ]] || continue
+            version="$(version_count "$url" "$sha" "$flavor" manager)"
+            if [[ "$version" == "$target" ]] && run_has_manager "$owner" "$repo" "$rid" "$want"; then
+              printf '%s %s' "$rid" "$sha"
+              return 0
+            fi
+          done < <(jq -r '.workflow_runs[]? | [.id, .head_sha] | @tsv' <<< "$runs")
         }
 
         # Emits into REC (never stdout): a function called as $(resolve_one) runs
@@ -160,6 +231,7 @@ runs:
         resolve_one() { # flavor
           local flavor="$1"
           local owner repo wf branch default_branch want stock pinned run_id mc selected_branch requested_commit note=""
+          local repo_url kernel_version candidate candidate_sha candidate_id
           # Exact commit this flavor's kernel embeds (empty when called from
           # managers.yml, which pins through the individual *_commit inputs).
           mc="$(matrix_commit "$flavor")"
@@ -168,6 +240,7 @@ runs:
           case "$flavor" in
             next)
               owner="KernelSU-Next"; repo="KernelSU-Next"; wf="build-manager-ci.yml"
+              repo_url="https://github.com/KernelSU-Next/KernelSU-Next.git"
               default_branch="dev"; branch="dev"; want="manager,manager-spoofed"
               # SUSFS off uses the selected official source branch first, like
               # the other roots. SUSFS on retains its original official-dev
@@ -175,7 +248,7 @@ runs:
               if [[ "${INPUT_SUSFS_ENABLED:-true}" != "true" ]]; then
                 branch="${selected_branch:-dev}"
               fi
-              resolve_stock "${mc:-${INPUT_NEXT_COMMIT:-}}" kernelsu_next_commit https://github.com/KernelSU-Next/KernelSU-Next.git "$branch"
+              resolve_stock "${mc:-${INPUT_NEXT_COMMIT:-}}" kernelsu_next_commit "$repo_url" "$branch"
               # With SUSFS on, the matrix carries a pershoot dev-susfs commit --
               # a fork-only SHA. The kernel reports the version of its merge base
               # with upstream dev, so pair the manager with that same upstream
@@ -194,8 +267,9 @@ runs:
               ;;
             next-susfs)
               owner="pershoot"; repo="KernelSU-Next"; wf="build-manager-ci.yml"
+              repo_url="https://github.com/pershoot/KernelSU-Next.git"
               default_branch="dev-susfs"; branch="dev-susfs"; want="manager,manager-spoofed"
-              resolve_stock "${mc:-${INPUT_NEXT_SUSFS_COMMIT:-}}" kernelsu_next_susfs_commit https://github.com/pershoot/KernelSU-Next.git dev-susfs
+              resolve_stock "${mc:-${INPUT_NEXT_SUSFS_COMMIT:-}}" kernelsu_next_susfs_commit "$repo_url" dev-susfs
               if [[ -z "$STOCK" && -z "${INPUT_NEXT_SUSFS_COMMIT:-}" ]]; then
                 # pershoot fork unreachable: fall back to upstream dev-susfs tip.
                 echo "pershoot dev-susfs tip not found; trying upstream KernelSU-Next dev-susfs" >&2
@@ -204,29 +278,34 @@ runs:
               ;;
             kernelsu)
               owner="tiann"; repo="KernelSU"; wf="build-manager.yml"
+              repo_url="https://github.com/tiann/KernelSU.git"
               default_branch="main"; branch="${selected_branch:-main}"; want="manager"
-              resolve_stock "${mc:-${INPUT_KSU_COMMIT:-}}" kernelsu_commit https://github.com/tiann/KernelSU.git "$branch"
+              resolve_stock "${mc:-${INPUT_KSU_COMMIT:-}}" kernelsu_commit "$repo_url" "$branch"
               ;;
             bakasu)
               owner="Baka-SU"; repo="BakaSU"; wf="build-manager.yml"
+              repo_url="https://github.com/Baka-SU/BakaSU.git"
               default_branch="main"; branch="${selected_branch:-main}"; want="Manager-release,Spoofed-Manager-release"
-              resolve_stock "${mc:-${INPUT_BAKASU_COMMIT:-}}" bakasu_commit https://github.com/Baka-SU/BakaSU.git "$branch"
+              resolve_stock "${mc:-${INPUT_BAKASU_COMMIT:-}}" bakasu_commit "$repo_url" "$branch"
               ;;
             sukisu-ultra)
               owner="SukiSU-Ultra"; repo="SukiSU-Ultra"; wf="build-manager.yml"
-              default_branch="main"; branch="${selected_branch:-main}"; want="Manager,Spoofed-Manager"
-              resolve_stock "${mc:-${INPUT_SUKISU_ULTRA_COMMIT:-}}" sukisu_ultra_commit https://github.com/SukiSU-Ultra/SukiSU-Ultra.git "$branch"
+              repo_url="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
+              default_branch="main"; branch="${selected_branch:-main}"; want="Manager,Manager-spoofed,Spoofed-Manager"
+              resolve_stock "${mc:-${INPUT_SUKISU_ULTRA_COMMIT:-}}" sukisu_ultra_commit "$repo_url" "$branch"
               ;;
             finasu)
               owner="LyraVoid"; repo="FinaSU"; wf="build-manager.yml"
+              repo_url="https://github.com/LyraVoid/FinaSU.git"
               default_branch="master"; branch="${selected_branch:-master}"; want="manager"
-              resolve_stock "${mc:-${INPUT_FINASU_COMMIT:-}}" finasu_commit https://github.com/LyraVoid/FinaSU.git "$branch"
+              resolve_stock "${mc:-${INPUT_FINASU_COMMIT:-}}" finasu_commit "$repo_url" "$branch"
               ;;
             kowsu)
               # KowSU has no SUSFS support; match the selected source branch.
               owner="KOWX712"; repo="KernelSU"; wf="build-manager.yml"
+              repo_url="https://github.com/KOWX712/KernelSU.git"
               default_branch="master"; branch="${selected_branch:-master}"; want="manager"
-              resolve_stock "$mc" kowsu_commit https://github.com/KOWX712/KernelSU.git "$branch"
+              resolve_stock "$mc" kowsu_commit "$repo_url" "$branch"
               ;;
             *)
               echo "skipping unknown flavor: $flavor" >&2
@@ -237,6 +316,10 @@ runs:
           stock="$STOCK"; pinned="$PINNED"; requested_commit="$STOCK"
 
           run_id="$(find_run "$owner" "$repo" "$wf" "$stock")"
+          if [[ -n "$run_id" ]] && ! run_has_manager "$owner" "$repo" "$run_id" "$want"; then
+            echo "No usable Manager APK artifact in exact run $run_id" >&2
+            run_id=""
+          fi
           if [[ -z "$run_id" ]]; then
             # The pershoot fork runs no manager CI at all, so a dev-susfs commit
             # never has a run to match. Substituting a different commit here is
@@ -252,13 +335,37 @@ runs:
               echo "ERROR: no ${owner}/${repo} manager build exists for pinned commit ${stock}" >&2
               exit 1
             fi
-            echo "No manager build for ${stock:-unknown tip}; checking latest successful run on selected branch ${branch}" >&2
-            note="fallback"
-            read -r run_id stock <<< "$(fallback_run "$owner" "$repo" "$wf" "$branch")"
+            # Reuse one complete history checkout for all candidate versions.
+            # A missing history only disables version matching, not fallback.
+            init_version_repo "$repo_url" || true
+            kernel_version="$(version_count "$repo_url" "$stock" "$flavor" kernel)"
+            echo "No exact Manager APK run for ${stock:-unknown tip}; estimated kernel version count: ${kernel_version:-unavailable}" >&2
+            if [[ -n "$kernel_version" ]]; then
+              candidate="$(matching_version_run "$owner" "$repo" "$wf" "$branch" "$want" "$kernel_version" "$repo_url" "$flavor")"
+              if [[ -n "$candidate" ]]; then
+                read -r run_id stock <<< "$candidate"
+                note="selected-branch-version-match"
+              elif [[ "$branch" != "$default_branch" ]]; then
+                candidate="$(matching_version_run "$owner" "$repo" "$wf" "$default_branch" "$want" "$kernel_version" "$repo_url" "$flavor")"
+                if [[ -n "$candidate" ]]; then
+                  read -r run_id stock <<< "$candidate"
+                  note="default-branch-version-match"
+                fi
+              fi
+            fi
+            if [[ -z "$run_id" ]]; then
+              echo "No equal-version Manager APK; checking latest successful run on selected branch ${branch}" >&2
+              read -r candidate_id candidate_sha <<< "$(fallback_run "$owner" "$repo" "$wf" "$branch" "$want")"
+              if [[ -n "$candidate_id" ]]; then
+                run_id="$candidate_id"; stock="$candidate_sha"; note="selected-branch-latest"
+              fi
+            fi
             if [[ -z "$run_id" && "$branch" != "$default_branch" ]]; then
-              echo "WARNING: no Manager CI run on selected branch ${branch}; trying default Manager branch ${default_branch}" >&2
-              read -r run_id stock <<< "$(fallback_run "$owner" "$repo" "$wf" "$default_branch")"
-              [[ -z "$run_id" ]] || note="default-branch-fallback"
+              echo "No usable Manager APK on ${branch}; checking ${default_branch}" >&2
+              read -r candidate_id candidate_sha <<< "$(fallback_run "$owner" "$repo" "$wf" "$default_branch" "$want")"
+              if [[ -n "$candidate_id" ]]; then
+                run_id="$candidate_id"; stock="$candidate_sha"; note="default-branch-latest"
+              fi
             fi
             if [[ -z "$run_id" ]]; then
               echo "ERROR: no ${owner}/${repo} Manager build found for commit ${requested_commit:-unknown} or selected/default branches" >&2
